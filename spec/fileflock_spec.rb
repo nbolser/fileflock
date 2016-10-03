@@ -1,15 +1,77 @@
-require 'test_helper'
+require 'spec_helper'
 
-class FileflockTest < Minitest::Test
-  def test_that_it_has_a_version_number
-    refute_nil Fileflock::VERSION
-  end
+require 'fileflock'
+require 'timeout'
 
-  describe Fileflock do
-    it 'initializes with argument' do
-      file_path = '/tmp/foo.txt'
+RSpec.describe Fileflock do
+  context 'basic usage' do
+    let(:lockname) { "#{Dir.pwd}-#{rand}.lock" }
 
-      Fileflock.new(file_path).must_be_kind_of(Fileflock)
+    it 'creates file with exact path provided' do
+      Fileflock lockname do; end
+
+      expect(File.exist?(lockname)).to eq(true)
+    end
+
+    it 'executes code within the lock block' do
+      result = 0
+
+      Fileflock lockname do
+        result += 5
+      end
+
+      expect(result).to eq(5)
+    end
+
+    it 'raises error when lock cannot be acquired' do
+      Dir.mktmpdir do |dir|
+        lockname = File.join(dir, 'sample.lock')
+
+        pid = fork do
+          Fileflock lockname do
+            sleep 5
+          end
+        end
+
+        sleep 1
+
+        expect {
+          Fileflock lockname  do
+            puts "Trying to lock this file again."
+          end
+        }.to raise_error(LockTimeoutReached)
+
+        Process.wait
+      end
+    end
+
+    it 'should unblock files when killing processes' do
+      Dir.mktmpdir do |dir|
+        lockname = File.join(dir, 'sample.lock')
+
+        pid = fork do
+          Fileflock lockname do
+            sleep 5
+          end
+        end
+
+        sleep 1
+
+        expect {
+          Fileflock lockname  do
+            puts "Trying to lock this file again."
+          end
+        }.to raise_error(LockTimeoutReached)
+
+        Process.kill(9, pid)
+
+        expect {
+          Fileflock lockname  do
+            puts "Trying to lock this file again."
+          end
+        }.not_to raise_error(LockTimeoutReached)
+      end
     end
   end
 end
+
